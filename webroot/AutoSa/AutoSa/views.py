@@ -36,6 +36,10 @@ admin_cn = cf.get('jumpserver', 'admin_cn')
 admin_pass = cf.get('jumpserver', 'admin_pass')
 log_dir = os.path.join(CONF_DIR, 'logs')
 web_socket_host = cf.get('jumpserver', 'web_socket_host')
+ha_brother = cf.get('ha', 'brother')
+ha_port = cf.get('ha', 'port')
+ha_user = cf.get('ha', 'user')
+ha_password = cf.get('ha', 'password')
 
 
 def keygen(num):
@@ -436,11 +440,33 @@ def addUser(request):
             ret_add = bash('useradd %s' % username)
             ret_passwd = bash('echo %s | passwd --stdin %s' % (password, username))
             ret_rsa = rsa_gen(username, key_pass)
+            ret_bro_add = 0
+            authorized_file = '/home/%s/.ssh/authorized_keys' % username
+            pub_key = '%s/%s.pub' % (rsa_dir, username)
 
-            if [ret_add, ret_passwd, ret_rsa].count(0) < 3:
+            # 如果存在brother，就在brother服务器添加
+            if ha_brother and ha_port:
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                try:
+                    ssh.connect(ha_brother, ha_port, ha_user, ha_password)
+                except paramiko.AuthenticationException:
+                    ret_bro_add = 2
+                else:
+                    stderr0 = ssh.exec_command('useradd %s;echo %s | passwd --stdin %s' %
+                                               (username, password, username))[2].read()
+                    stderr1 = ssh.exec_command('mkdir -p %s;echo %s > %s;chown %s %s; chmod 600 %s;' %
+                                               ('/home/%s/.ssh/', open(pub_key).read(), authorized_file, username,
+                                                authorized_file, authorized_file))
+                    if stderr0 or stderr1:
+                        ret_bro_add = 3
+
+            if [ret_add, ret_passwd, ret_rsa, ret_bro_add].count(0) < 4:
                 error = u'跳板机添加用户失败'
                 bash('userdel -r %s' % username)
                 u.delete()
+                if ret_bro_add == 3:
+                    ssh.exec_command('userdel -r %s' % username)
                 return render_to_response('addUser.html', {'user_menu': 'active', 'form': form, 'error': error},
                                           context_instance=RequestContext(request))
 
