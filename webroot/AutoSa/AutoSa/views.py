@@ -37,7 +37,7 @@ admin_pass = cf.get('jumpserver', 'admin_pass')
 log_dir = os.path.join(CONF_DIR, 'logs')
 web_socket_host = cf.get('jumpserver', 'web_socket_host')
 ha_brother = cf.get('ha', 'brother')
-ha_port = cf.get('ha', 'port')
+ha_port = int(cf.get('ha', 'port'))
 ha_user = cf.get('ha', 'user')
 ha_password = cf.get('ha', 'password')
 
