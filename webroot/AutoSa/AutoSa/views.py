@@ -456,8 +456,8 @@ def addUser(request):
                     stderr0 = ssh.exec_command('useradd %s;echo %s | passwd --stdin %s' %
                                                (username, password, username))[2].read()
                     stderr1 = ssh.exec_command('mkdir -p %s;echo %s > %s;chown %s %s; chmod 600 %s;' %
-                                               ('/home/%s/.ssh/', open(pub_key).read(), authorized_file, username,
-                                                authorized_file, authorized_file))
+                                               ('/home/%s/.ssh/' % username, open(pub_key).read(), authorized_file, username,
+                                                authorized_file, authorized_file))[2].read()
                     if stderr0 or stderr1:
                         ret_bro_add = 3
 
