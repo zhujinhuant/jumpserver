@@ -384,6 +384,10 @@ def showUser(request):
                 if bash_del != 0:
                     error = u'bash中用户删除错误'
 
+                ssh = SSH()
+                ssh.connect(ha_brother, ha_port, ha_user, ha_password)
+                ssh.exec_cmd('userdel -r %s' % username)
+
                 # 从LDAP中删除
                 try:
                     ldap_del = LDAPMgmt()
@@ -477,15 +481,17 @@ def addUser(request):
                 except:
                     ret_bro_add = 2
                 else:
+                    with open(pub_key) as f:
+                        key_content = f.read()
                     stderr0 = ssh.exec_cmd('''useradd %s;
-                                              echo %s | passwd --stdin %s''' % (username, password, username)
+                                              echo "%s" | passwd --stdin "%s"''' % (username, password, username)
                                            )[2].read()
                     stderr1 = ssh.exec_cmd('''mkdir -p %s;
-                                           echo %s > %s;
+                                           echo '%s' > %s;
                                            chown %s %s;
                                            chmod 600 %s;''' %
                                            ('/home/%s/.ssh/' % username,
-                                            open(pub_key).read(), authorized_file,
+                                            key_content, authorized_file,
                                             username, authorized_file,
                                             authorized_file))[2].read()
                     if stderr0 or stderr1:
