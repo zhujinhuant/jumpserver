@@ -159,6 +159,25 @@ class LDAPMgmt():
             print e
 
 
+class SSH(object):
+    def __init__(self):
+        self.ssh = paramiko.SSHClient()
+        self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    def connect(self, host, port, user, password):
+        try:
+            self.ssh.connect(host, port, user, password)
+        except:
+            raise ValueError
+
+    def exec_cmd(self, command):
+        stdin, stdout, stderr = self.ssh.exec_command(command)
+        return stdin, stdout, stderr
+
+    def close(self):
+        self.ssh.close()
+
+
 def gen_sha512(salt, password):
     return crypt.crypt(password, '$6$%s$' % salt)
 
@@ -234,7 +253,7 @@ def install(request):
         return render_to_response('info.html', {'error': error})
     else:
         u = User(
-            id=800,
+            id=1000,
             username='admin',
             password=md5_crypt('admin'),
             key_pass=md5_crypt('admin'),
@@ -437,38 +456,50 @@ def addUser(request):
                                           context_instance=RequestContext(request))
 
             # 系统中添加用户
-            ret_add = bash('useradd %s' % username)
-            ret_passwd = bash('echo %s | passwd --stdin %s' % (password, username))
+            ret_add = bash('useradd %s; echo %s | passwd --stdin %s ' % (username, password, username))
             ret_rsa = rsa_gen(username, key_pass)
             ret_bro_add = 0
             authorized_file = '/home/%s/.ssh/authorized_keys' % username
             pub_key = '%s/%s.pub' % (rsa_dir, username)
 
-            # 如果存在brother，就在brother服务器添加
-            if ha_brother and ha_port:
-                ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                try:
-                    ssh.connect(ha_brother, ha_port, ha_user, ha_password)
-                except paramiko.AuthenticationException:
-                    ret_bro_add = 2
-                else:
-                    stderr0 = ssh.exec_command('useradd %s;echo %s | passwd --stdin %s' %
-                                               (username, password, username))[2].read()
-                    stderr1 = ssh.exec_command('mkdir -p %s;echo %s > %s;chown %s %s; chmod 600 %s;' %
-                                               ('/home/%s/.ssh/' % username, open(pub_key).read(), authorized_file, username,
-                                                authorized_file, authorized_file))[2].read()
-                    if stderr0 or stderr1:
-                        ret_bro_add = 3
-
-            if [ret_add, ret_passwd, ret_rsa, ret_bro_add].count(0) < 4:
+            if [ret_add, ret_rsa].count(0) < 2:
                 error = u'跳板机添加用户失败'
                 bash('userdel -r %s' % username)
                 u.delete()
-                if ret_bro_add == 3:
-                    ssh.exec_command('userdel -r %s' % username)
                 return render_to_response('addUser.html', {'user_menu': 'active', 'form': form, 'error': error},
                                           context_instance=RequestContext(request))
+
+            # 如果存在brother，就在brother服务器添加
+            if ha_brother and ha_port:
+                ssh = SSH()
+                try:
+                    ssh.connect(ha_brother, ha_port, ha_user, ha_password)
+                except:
+                    ret_bro_add = 2
+                else:
+                    stderr0 = ssh.exec_cmd('''useradd %s;
+                                              echo %s | passwd --stdin %s''' % (username, password, username)
+                                           )[2].read()
+                    stderr1 = ssh.exec_cmd('''mkdir -p %s;
+                                           echo %s > %s;
+                                           chown %s %s;
+                                           chmod 600 %s;''' %
+                                           ('/home/%s/.ssh/' % username,
+                                            open(pub_key).read(), authorized_file,
+                                            username, authorized_file,
+                                            authorized_file))[2].read()
+                    if stderr0 or stderr1:
+                        ret_bro_add = 3
+
+                if ret_bro_add > 0:
+                    error = u'备用跳板机添加用户失败'
+                    bash('userdel -r %s' % username)
+                    u.delete()
+                    if ret_bro_add == 3:
+                        ssh.exec_cmd('userdel -r %s' % username)
+                    return render_to_response('addUser.html', {'user_menu': 'active', 'form': form, 'error': error},
+                                              context_instance=RequestContext(request))
+
 
             # 添加到ldap中
             user_dn = "uid=%s,ou=People,%s" % (username, ldap_base_dn)
@@ -497,8 +528,7 @@ def addUser(request):
 
             sudo_dn = 'cn=%s,ou=Sudoers,%s' % (username, ldap_base_dn)
             sudo_attr = {
-                'objectClass': ['top'],
-                'objectClass': ['sudoRole'],
+                'objectClass': ['top', 'sudoRole'],
                 'cn': ['%s' % str(username)],
                 'sudoCommand': ['/bin/pwd'],
                 'sudoHost': ['192.168.1.1'],
@@ -516,6 +546,8 @@ def addUser(request):
                 try:
                     bash('userdel -r %s' % username)
                     u.delete()
+                    if ha_brother and ha_port:
+                        ssh.exec_cmd('userdel -r %s' % username)
                     ldap_conn.delete(user_dn)
                     ldap_conn.delete(group_dn)
                     ldap_conn.delete(sudo_dn)
