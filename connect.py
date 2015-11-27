@@ -42,7 +42,7 @@ SSH_KEY_DIR = os.path.join(BASE_DIR, 'keys')
 SERVER_KEY_DIR = os.path.join(SSH_KEY_DIR, 'server')
 LOGIN_NAME = getpass.getuser()
 
-
+#
 def color_print(msg, color='blue'):
     """Print colorful string."""
     color_msg = {'blue': '\033[1;36m%s\033[0m',
